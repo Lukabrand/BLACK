@@ -12,7 +12,7 @@ const DEFAULT_REACT_CONFIG = {
     viewMode: 'view+react',
     mode: 'fixed',
     fixedEmoji: '💚',
-    reactions: ["🐺", "❤️", "👍", "🔥", "🎉", "😂", "😮", "👏", "🎯", "💯", "🌟", "✨", "⚡", "💥", "🫶"],
+    reactions: ["💚", "❤️", "👍", "🔥", "🎉", "😂", "😮", "👏", "🎯", "💯", "🌟", "✨", "⚡", "💥", "🫶"],
     cycleIndex: 0,
     excludedContacts: [],
     logs: [],
