@@ -11,7 +11,7 @@ const DEFAULT_REACT_CONFIG = {
     onlyOnOwnerReply: false,
     viewMode: 'view+react',
     mode: 'fixed',
-    fixedEmoji: '🐺',
+    fixedEmoji: '💚',
     reactions: ["🐺", "❤️", "👍", "🔥", "🎉", "😂", "😮", "👏", "🎯", "💯", "🌟", "✨", "⚡", "💥", "🫶"],
     cycleIndex: 0,
     excludedContacts: [],
