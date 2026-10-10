@@ -10,7 +10,7 @@ let _manager = null;
 function getManager() {
     if (_manager) return _manager;
     try {
-        const mod = require('../../../guru/plugins/autoreactstatus');
+        const mod = require('../../../guruh/plugins/autoreactstatus');
         _manager = mod.autoReactManager;
     } catch (e) {
         console.warn('[autoreactstatus] Could not load AutoReactManager:', e.message);
