@@ -18,7 +18,7 @@ const config = {
     OWNER_NAME: process.env.OWNER_NAME || 'GuruTech',
     OWNER_NUMBER: process.env.OWNER_NUMBER || '254105521300',
     PREFIX: process.env.PREFIX || process.env.BOT_PREFIX || '.',
-    VERSION: process.env.VERSION || process.env.BOT_VERSION || '1.0.0',
+    VERSION: process.env.VERSION || process.env.BOT_VERSION || '5.0.0',
     PACK_NAME: process.env.PACK_NAME || 'BLACK PANTHER MD',
     PACK_AUTHOR: process.env.PACK_AUTHOR || 'GuruTech',
     BOT_LANG: process.env.BOT_LANG || 'en',
