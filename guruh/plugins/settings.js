@@ -230,43 +230,157 @@ addCmd({
 // ═══════════════════════════════════════════════════════════════
 
 addCmd({
-    name:      'botsettings',
-    aliases:   ['settings', 'bsettings', 'config'],
-    desc:      'View all current bot settings at a glance',
-    category:  'owner',
+    name: 'botsettings',
+    aliases: ['settings', 'bsettings', 'config'],
+    desc: 'View all bot and group settings',
+    category: 'owner',
     ownerOnly: true,
-    handler:   async (ctx) => {
-        const on  = (v) => v === true || v === 'true' ? '🟢 ON' : '🔴 OFF';
-        const warnLimit = getSetting('WARN_LIMIT', '3');
 
-        const text =
-            `⚙️ *${config.BOT_NAME} — Settings*\n` +
-            `▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n\n` +
-            `🤖 *Bot Identity*\n` +
-            `  Name    » *${config.BOT_NAME}*\n` +
-            `  Owner   » *${config.OWNER_NAME}*\n` +
-            `  Prefix  » *${config.BOT_PREFIX}*\n` +
-            `  Mode    » *${config.MODE.toUpperCase()}*\n` +
-            `  Version » *${config.BOT_VERSION}*\n` +
-            `  TZ      » *${config.TIME_ZONE}*\n\n` +
-            `▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n` +
-            `⚡ *Auto Features*\n` +
-            `  Auto-React    » ${on(config.AUTO_REACT)}\n` +
-            `  Auto-Bio      » ${on(config.AUTO_BIO)}\n` +
-            `  Auto-Read     » ${on(config.AUTO_READ_STATUS)}\n` +
-            `  Auto-Like     » ${on(config.AUTO_LIKE_STATUS)}\n` +
-            `  Auto-Typing   » ${on(getSetting('AUTO_TYPING', 'false'))}\n\n` +
-            `▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n` +
-            `🔒 *Privacy*\n` +
-            `  Freeze LastSeen » ${on(getSetting('FREEZE_LAST_SEEN', 'false'))}\n` +
-            `  Ghost Mode      » ${on(getSetting('GHOST_MODE', 'false'))}\n\n` +
-            `▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n` +
-            `⚠️ *Warnings*\n` +
-            `  Kick Limit » *${warnLimit} warnings*\n\n` +
-            `▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n` +
-            `_Use .setmode / .setprefix / .autoreact etc. to change_`;
+    handler: async (ctx) => {
+        try {
+            const allSettings = [
+                'ANTICALL',
+                'ANTICALL_MSG',
+                'ANTIDELETE',
+                'ANTIVIEWONCE',
+                'ANTI_EDIT',
+                'AUTO_BIO',
+                'AUTO_BLOCK',
+                'AUTO_CHANNEL_LIKE',
+                'AUTO_JOIN',
+                'AUTO_LIKE_STATUS',
+                'AUTO_MUTE',
+                'AUTO_REACT',
+                'AUTO_READ_MESSAGES',
+                'AUTO_READ_STATUS',
+                'AUTO_REPLY',
+                'AUTO_REPLY_STATUS',
+                'AUTO_UPDATE',
+                'BOT_BIO',
+                'BOT_LANG',
+                'BOT_NAME',
+                'BOT_PIC',
+                'BOT_PREFIX',
+                'BOT_REPO',
+                'BOT_VERSION',
+                'CAPTION',
+                'CHATBOT',
+                'CHATBOT_MODE',
+                'DM_PERMIT_ACTION',
+                'DM_PERMIT_MSG',
+                'DM_PRESENCE',
+                'FOOTER',
+                'GC_JID',
+                'GC_PRESENCE',
+                'GLOBAL_SPAM_FILTER',
+                'GREETINGS_AUTOTRACK',
+                'GREETINGS_ENABLED',
+                'GREETINGS_GM_MSG',
+                'GREETINGS_GM_TIME',
+                'GREETINGS_GN_MSG',
+                'GREETINGS_GN_TIME',
+                'GROUP_JOIN_ACTION',
+                'MENU_THEME',
+                'MODE',
+                'MSG_COUNTER',
+                'NEWSLETTER_JID',
+                'NEWSLETTER_URL',
+                'OWNER_NAME',
+                'OWNER_NUMBER',
+                'PACK_AUTHOR',
+                'PACK_NAME',
+                'PM_PERMIT',
+                'PREFIX',
+                'REJECT_CALL',
+                'STARTING_MESSAGE',
+                'STATUS_LIKE_EMOJIS',
+                'STATUS_REACT_EMOJI',
+                'STATUS_REPLY_TEXT',
+                'SUDO_NUMBERS',
+                'TAG_PROTECT',
+                'TIME_ZONE',
+                'VERSION',
+                'VV_TRACKER',
+                'WARN_COUNT',
+                'WARN_LIMIT',
+                'YT',
+            ];
 
-        await ctx.reply(text);
+            const onOff = (value) => {
+                if (value === true || String(value).toLowerCase() === 'true') return 'true';
+                if (value === false || String(value).toLowerCase() === 'false') return 'false';
+                return value;
+            };
+
+            const formatValue = (value) => {
+                if (value === undefined || value === null || value === '') {
+                    return 'Not Set';
+                }
+
+                if (typeof value === 'object') {
+                    return JSON.stringify(value);
+                }
+
+                return String(onOff(value));
+            };
+
+            const getValue = (key) => {
+                const dbValue = getSetting(key, undefined);
+
+                if (dbValue !== undefined && dbValue !== null) {
+                    return dbValue;
+                }
+
+                if (config[key] !== undefined && config[key] !== null) {
+                    return config[key];
+                }
+
+                return 'Not Set';
+            };
+
+            let text =
+                `╭══〘〘 *${config.BOT_NAME || 'LUKA-XMD'}* 〙〙═⊷\n` +
+                `      *BOT SETTINGS*\n` +
+                `╰══✦ ✦══⊷\n\n`;
+
+            for (const key of allSettings) {
+                const value = getValue(key);
+                text += `▸ *${key}:* ${formatValue(value)}\n`;
+            }
+
+            const sudoUsers = getValue('SUDO_USERS');
+            text += `\n▸ *SUDO_USERS:* ${formatValue(sudoUsers)}\n`;
+
+            const groupSettings = getGroupSettings(ctx.from) || {};
+
+            const groupValue = (...keys) => {
+                for (const key of keys) {
+                    if (groupSettings[key] !== undefined && groupSettings[key] !== null) {
+                        return formatValue(groupSettings[key]);
+                    }
+                }
+                return 'None';
+            };
+
+            text +=
+                `\n╭══〘〘 *${config.BOT_NAME || 'LUKA-XMD'}* 〙〙═⊷\n` +
+                `      📋 *GROUP SETTINGS*\n` +
+                `╰══✦ ✦══⊷\n\n`;
+
+            text += `*🎉 WELCOME MESSAGE:*\n${groupValue('welcomeMessage', 'welcome', 'welcomemsg')}\n\n`;
+            text += `*👋 GOODBYE MESSAGE:*\n${groupValue('goodbyeMessage', 'goodbye', 'goodbyemsg')}\n\n`;
+            text += `*📢 GROUP EVENTS:*\n${groupValue('groupEvents', 'events')}\n\n`;
+            text += `*🔗 ANTILINK:*\n${groupValue('antilink', 'antilinkAction')}\n\n`;
+            text += `*🚫 ANTIBAD:*\n${groupValue('antibad', 'badwords')}\n\n`;
+            text += `*🛡️ ANTI-GROUP-MENTION:*\n${groupValue('antigroupmention', 'antiGroupMention')}\n\n`;
+
+            text += 'ᴘᴏᴡᴇʀᴇᴅ ʙʏ ʟᴜᴋᴀʙʀᴀɴᴅ';
+
+            await ctx.reply(text);
+        } catch (error) {
+            console.error('[BOT SETTINGS ERROR]', error);
+            await ctx.reply(`❌ Failed to load settings.\n${error.message || error}`);
+        }
     },
 });
 
