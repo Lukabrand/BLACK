@@ -8,13 +8,17 @@ const { addCmd }                    = require('../../guru/handlers/loader');
 const { getAutoStatusSettings }     = require('../statusManager');
 const { channelCtx }                = require('../../guru/utils/gmdFunctions2');
 const config                        = require('../../guru/config/settings');
+const { getSetting, setSetting }    = require('../../guru/db/database');
 
 // Initialise global runtime flags if not set
 if (!global.autoStatusFlags) {
     global.autoStatusFlags = { seen: null, react: null };
 }
 if (!global.autoPresenceFlags) {
-    global.autoPresenceFlags = { typing: null, recording: null };
+    global.autoPresenceFlags = {
+        typing: getSetting('AUTO_TYPING', String(config.AUTO_TYPING)) === 'true',
+        recording: getSetting('AUTO_RECORDING', String(config.AUTO_RECORDING)) === 'true',
+    };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -40,11 +44,15 @@ addCmd({
                 case 'view':
                 case 'seen':
                     global.autoStatusFlags.seen = val;
+                    setSetting('AUTO_READ_STATUS', String(val));
+                    config.AUTO_READ_STATUS = val;
                     changed = `Auto View  ·  *${val ? 'ON' : 'OFF'}*`;
                     break;
                 case 'react':
                 case 'like':
                     global.autoStatusFlags.react = val;
+                    setSetting('AUTO_LIKE_STATUS', String(val));
+                    config.AUTO_LIKE_STATUS = val;
                     changed = `Auto React ·  *${val ? 'ON' : 'OFF'}*`;
                     break;
                 default:
@@ -131,6 +139,8 @@ addCmd({
                       : arg === 'off' ? false
                       : !current;
         global.autoPresenceFlags.typing = next;
+        setSetting('AUTO_TYPING', String(next));
+        config.AUTO_TYPING = next;
 
         await ctx.sock.sendMessage(
             ctx.from,
@@ -162,6 +172,8 @@ addCmd({
                       : arg === 'off' ? false
                       : !current;
         global.autoPresenceFlags.recording = next;
+        setSetting('AUTO_RECORDING', String(next));
+        config.AUTO_RECORDING = next;
 
         await ctx.sock.sendMessage(
             ctx.from,

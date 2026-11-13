@@ -94,6 +94,8 @@ addCmd({
         const newVal  = !current;
         setSetting('AUTO_TYPING', String(newVal));
         config.AUTO_TYPING = newVal;
+        if (!global.autoPresenceFlags) global.autoPresenceFlags = { typing: null, recording: null };
+        global.autoPresenceFlags.typing = newVal;
         await ctx.reply(
             newVal
                 ? '⌨️ *Auto-Typing ON*\n\nI will show a typing indicator before every reply.'
@@ -286,6 +288,8 @@ addCmd({
         const newVal  = !current;
         setSetting('AUTO_RECORDING', String(newVal));
         config.AUTO_RECORDING = newVal;
+        if (!global.autoPresenceFlags) global.autoPresenceFlags = { typing: null, recording: null };
+        global.autoPresenceFlags.recording = newVal;
         await ctx.reply(
             newVal
                 ? '🎙️ *Auto-Recording ON*\n\nI will show a recording indicator before every reply.'
