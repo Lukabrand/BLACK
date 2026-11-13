@@ -3,6 +3,28 @@ const Database = require('better-sqlite3');
 const path     = require('path');
 const fs       = require('fs');
 
+// Heroku dyno storage is ephemeral. PostgreSQL is the durable source of truth
+// for command settings; SQLite remains the synchronous local cache.
+let pgPool = null;
+let persistQueue = Promise.resolve();
+let persistentReady = false;
+let persistentError = null;
+
+function queuePersistentWrite(task) {
+    if (!pgPool) return;
+    persistQueue = persistQueue.then(task).then(() => {
+        persistentError = null;
+    }).catch(err => {
+        persistentError = err;
+        console.error('[DB] PostgreSQL settings write failed:', err.message);
+    });
+}
+
+async function flushPersistentWrites() {
+    await persistQueue;
+    if (pgPool && persistentError) throw persistentError;
+}
+
 const DB_DIR  = path.join(__dirname, '../GuruTech/sessions');
 const DB_PATH = path.join(DB_DIR, 'panther.db');
 if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
@@ -43,7 +65,10 @@ db.exec(`
         antiforeign  INTEGER DEFAULT 0,
         antisticker  INTEGER DEFAULT 0,
         antiflood    INTEGER DEFAULT 0,
-        welcomeMsg   TEXT DEFAULT ''
+        welcomeMsg   TEXT DEFAULT '',
+        welcome_on   INTEGER DEFAULT 0,
+        bye           TEXT DEFAULT '',
+        bye_on        INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS warnings (
@@ -73,7 +98,7 @@ db.exec(`
     CREATE INDEX IF NOT EXISTS idx_notes_group        ON notes(group_jid, name);
 `);
 
-const newCols = ['antimention', 'antiviewonce', 'antiforeign', 'antisticker', 'antiflood', 'antiedit', 'welcomeMsg TEXT DEFAULT \'\''];
+const newCols = ['antimention', 'antiviewonce', 'antiforeign', 'antisticker', 'antiflood', 'antiedit', "welcomeMsg TEXT DEFAULT ''", 'welcome_on INTEGER DEFAULT 0', "bye TEXT DEFAULT ''", 'bye_on INTEGER DEFAULT 0'];
 for (const col of newCols) {
     try { db.exec(`ALTER TABLE group_settings ADD COLUMN ${col}`); } catch {}
 }
@@ -117,7 +142,13 @@ function getSetting(key, fallback = null) {
 }
 
 function setSetting(key, value) {
-    stmts.setSetting.run(key, String(value));
+    const normalized = String(value);
+    stmts.setSetting.run(key, normalized);
+    queuePersistentWrite(() => pgPool.query(
+        `INSERT INTO bot_settings (key, value) VALUES ($1, $2)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [String(key), normalized]
+    ));
 }
 
 function seedDefaults(defaults = {}) {
@@ -142,10 +173,20 @@ function getGroupSettings(jid) {
 }
 
 function setGroupSetting(jid, key, value) {
+    const columns = new Set(db.prepare('PRAGMA table_info(group_settings)').all().map(c => c.name));
+    if (!columns.has(key)) throw new Error(`Unknown group setting: ${key}`);
     if (!groupSettingStmtCache.has(key)) {
         groupSettingStmtCache.set(key, db.prepare(`UPDATE group_settings SET ${key} = ? WHERE jid = ?`));
     }
-    groupSettingStmtCache.get(key).run(value ? 1 : 0, jid);
+    stmts.insertGroupRow.run(jid);
+    const storedValue = ['welcomeMsg', 'bye'].includes(key) ? String(value ?? '') : (value === true || value === 1 || String(value).toLowerCase() === 'true' || String(value) === '1' ? 1 : 0);
+    groupSettingStmtCache.get(key).run(storedValue, jid);
+    const row = stmts.getGroupSettings.get(jid);
+    queuePersistentWrite(() => pgPool.query(
+        `INSERT INTO bot_group_settings (jid, data) VALUES ($1, $2::jsonb)
+         ON CONFLICT (jid) DO UPDATE SET data = EXCLUDED.data`,
+        [String(jid), JSON.stringify(row)]
+    ));
 }
 
 function addWarning(jid, groupJid, reason = '') {
@@ -188,18 +229,124 @@ function getConfigSync(key, defaultValue = {}) {
 }
 
 async function setConfig(key, value) {
-    stmts.setSetting.run(key, JSON.stringify(value));
+    const normalized = JSON.stringify(value);
+    stmts.setSetting.run(key, normalized);
+    queuePersistentWrite(() => pgPool.query(
+        `INSERT INTO bot_settings (key, value) VALUES ($1, $2)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [String(key), normalized]
+    ));
+}
+
+async function initPersistentSettings() {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+        console.warn('[DB] DATABASE_URL is missing. Settings use local SQLite and may reset when the Heroku dyno restarts.');
+        return { persistent: false, reason: 'DATABASE_URL missing' };
+    }
+
+    let Pool;
+    try { ({ Pool } = require('pg')); }
+    catch (error) {
+        console.error('[DB] PostgreSQL driver is not installed:', error.message);
+        return { persistent: false, reason: 'pg package missing' };
+    }
+
+    pgPool = new Pool({
+        connectionString,
+        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+        max: 5,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000,
+    });
+
+    await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS bot_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS bot_group_settings (
+            jid TEXT PRIMARY KEY,
+            data JSONB NOT NULL DEFAULT '{}'::jsonb
+        );
+    `);
+
+    // One-time migration: copy existing SQLite values without overwriting
+    // settings already saved in PostgreSQL.
+    const localSettings = db.prepare('SELECT key, value FROM settings').all();
+    for (const row of localSettings) {
+        await pgPool.query(
+            'INSERT INTO bot_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING',
+            [row.key, row.value]
+        );
+    }
+
+    const localGroups = db.prepare('SELECT * FROM group_settings').all();
+    for (const row of localGroups) {
+        await pgPool.query(
+            'INSERT INTO bot_group_settings (jid, data) VALUES ($1, $2::jsonb) ON CONFLICT (jid) DO NOTHING',
+            [row.jid, JSON.stringify(row)]
+        );
+    }
+
+    // Load durable values into the synchronous SQLite cache before plugins
+    // are loaded and before the WhatsApp socket starts.
+    const remoteSettings = await pgPool.query('SELECT key, value FROM bot_settings');
+    const saveLocalSetting = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    const saveManySettings = db.transaction(rows => {
+        for (const row of rows) saveLocalSetting.run(row.key, row.value);
+    });
+    saveManySettings(remoteSettings.rows);
+
+    const remoteGroups = await pgPool.query('SELECT jid, data FROM bot_group_settings');
+    const columns = new Set(db.prepare('PRAGMA table_info(group_settings)').all().map(c => c.name));
+    const validColumns = [...columns].filter(c => c !== 'jid');
+    const updateGroup = db.prepare(`UPDATE group_settings SET ${validColumns.map(c => `${c} = @${c}`).join(', ')} WHERE jid = @jid`);
+    const insertGroup = db.prepare('INSERT OR IGNORE INTO group_settings (jid) VALUES (?)');
+    const saveGroups = db.transaction(rows => {
+        for (const item of rows) {
+            const data = typeof item.data === 'string' ? JSON.parse(item.data) : (item.data || {});
+            insertGroup.run(item.jid);
+            const values = { jid: item.jid };
+            for (const col of validColumns) {
+                values[col] = Object.prototype.hasOwnProperty.call(data, col)
+                    ? data[col]
+                    : (['welcomeMsg', 'bye'].includes(col) ? '' : 0);
+            }
+            updateGroup.run(values);
+        }
+    });
+    saveGroups(remoteGroups.rows);
+
+    persistentReady = true;
+    persistentError = null;
+    console.log(`[DB] PostgreSQL persistence ready (${remoteSettings.rowCount} global settings, ${remoteGroups.rowCount} group settings).`);
+    return { persistent: true, settings: remoteSettings.rowCount, groups: remoteGroups.rowCount };
 }
 
 function checkpoint() {
     try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch {}
 }
-process.on('exit',    checkpoint);
-process.on('SIGTERM', () => { checkpoint(); process.exit(0); });
-process.on('SIGINT',  () => { checkpoint(); process.exit(0); });
+process.on('exit', checkpoint);
+let shuttingDown = false;
+async function gracefulShutdown() {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    try { await flushPersistentWrites(); } catch (err) { console.error('[DB] Final persistence flush failed:', err.message); }
+    try {
+        const jsonDb = await import('../../guruh/database/config.js');
+        await jsonDb.flushPersistentDatabase();
+    } catch (err) { console.error('[DB] JSON database final flush failed:', err.message); }
+    checkpoint();
+    if (pgPool) { try { await pgPool.end(); } catch {} }
+    process.exit(0);
+}
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
 
 module.exports = {
     db,
+    initPersistentSettings, flushPersistentWrites,
     getSetting, setSetting, seedDefaults,
     getConfigSync, setConfig,
     addSudo, removeSudo, getSudoList, isSudo,
