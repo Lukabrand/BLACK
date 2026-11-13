@@ -69,7 +69,7 @@ function buildPluginCtx(ctx) {
 //  FLAT PLUGIN LOADER — CJS files in guruh/plugins/ root
 // ═══════════════════════════════════════════════════════════
 
-function loadPlugins() {
+async function loadPlugins() {
     const files = fs.readdirSync(PLUGINS_DIR).filter(f => f.endsWith('.js'));
     let loaded = 0;
     for (const file of files) {
@@ -82,8 +82,11 @@ function loadPlugins() {
     }
     console.log(`[LOADER] ${loaded}/${files.length} flat plugins loaded`);
 
-    // Fire-and-forget: load ESM subdirectory plugins after CJS plugins are done
-    loadSubdirPlugins().catch(e => console.error('[LOADER] Subdir load error:', e.message));
+    // Wait for every ESM subdirectory plugin before the WhatsApp socket starts.
+    // This prevents early messages from arriving while the command registry is empty.
+    const subdirResult = await loadSubdirPlugins();
+    console.log(`[LOADER] Ready: ${commands.size} command names registered`);
+    return { flat: loaded, ...subdirResult, commands: commands.size };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -150,6 +153,7 @@ async function loadSubdirPlugins() {
     }
 
     console.log(`[LOADER] Subdir plugins: ${loaded} loaded, ${failed} failed, ${skipped} skipped`);
+    return { subdirLoaded: loaded, failed, skipped };
 }
 
 function findCmd(name) {
