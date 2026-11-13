@@ -20,16 +20,72 @@ const _DEFAULTS = () => ({
 
 let _data      = null;
 let _saveTimer = null;
+let _pgPool = null;
+let _pgSaveQueue = Promise.resolve();
 const _settingsListeners = [];
 const _sudoListeners     = [];
 const _bannedListeners   = [];
 
 function _flush() {
     try { fs.writeFileSync(_jsonPath, JSON.stringify(_data, null, 2)); } catch {}
+    if (_pgPool) {
+        const snapshot = JSON.stringify(_data);
+        _pgSaveQueue = _pgSaveQueue.then(() => _pgPool.query(
+            `INSERT INTO bot_json_state (id, data) VALUES ('main', $1::jsonb)
+             ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
+            [snapshot]
+        )).catch(error => console.error('[DB] JSON state persistence failed:', error.message));
+    }
+    return _pgSaveQueue;
 }
 function _save() {
     if (_saveTimer) clearTimeout(_saveTimer);
-    _saveTimer = setTimeout(_flush, 400);
+    _saveTimer = setTimeout(() => { _saveTimer = null; _flush(); }, 400);
+}
+
+export async function initPersistentDatabase() {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+        if (process.env.DYNO) throw new Error('DATABASE_URL is missing on Heroku. Attach the Heroku Postgres add-on to keep ON/OFF settings permanently.');
+        return { persistent: false };
+    }
+
+    const pg = await import('pg');
+    const Pool = pg.Pool || pg.default?.Pool;
+    if (!Pool) throw new Error('The pg package does not expose Pool.');
+    _pgPool = new Pool({
+        connectionString,
+        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+        max: 3,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000,
+    });
+    await _pgPool.query(`CREATE TABLE IF NOT EXISTS bot_json_state (id TEXT PRIMARY KEY, data JSONB NOT NULL)`);
+    const result = await _pgPool.query(`SELECT data FROM bot_json_state WHERE id = 'main'`);
+    if (result.rows.length) {
+        const remote = typeof result.rows[0].data === 'string' ? JSON.parse(result.rows[0].data) : result.rows[0].data;
+        _data = Object.assign(_DEFAULTS(), remote || {});
+        _flushLocalOnly();
+    } else {
+        _init();
+        await _pgPool.query(
+            `INSERT INTO bot_json_state (id, data) VALUES ('main', $1::jsonb) ON CONFLICT (id) DO NOTHING`,
+            [JSON.stringify(_data)]
+        );
+    }
+    console.log('[DB] PostgreSQL JSON settings persistence ready.');
+    return { persistent: true };
+}
+
+function _flushLocalOnly() {
+    try { fs.writeFileSync(_jsonPath, JSON.stringify(_data, null, 2)); } catch {}
+}
+
+export async function flushPersistentDatabase() {
+    if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+    await _flush();
+    await _pgSaveQueue;
+    if (_pgPool) await _pgPool.end();
 }
 function _init() {
     if (_data) return;
