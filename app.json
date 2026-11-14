@@ -26,11 +26,6 @@
       "required": false,
       "value": "GuruTech"
     },
-    "OWNER_NUMBER": {
-      "description": "Your WhatsApp number with country code (e.g., 254712345678)",
-      "required": true,
-      "value": ""
-    },
     "MODE": {
       "description": "Bot mode: 'public' (everyone can use) or 'private' (only bot owner)",
       "required": true,
